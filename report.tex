@@ -1,0 +1,422 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{hyperref}
+
+\title{LYRA: Automatic Lyrics Annotation for Russian Rap using Retrieval and Generation}
+\author{Kirill Anpilov}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Automatic annotation and explanation of song lyrics presents a significant challenge in NLP, especially for Russian rap which is rich with metaphors, cultural references, and wordplay. I present LYRA (Lyrics Retrieval and Annotation), a system for generating explanations of Russian rap lyrics. The dataset consists of 22,220 annotations collected from Genius for 3,291 Russian rap songs. I implement and compare multiple retrieval approaches: TF-IDF (ROUGE-1: 0.0070), BM25 (ROUGE-1: 0.0140), SBERT semantic search (ROUGE-1: 0.0087), Hybrid retrieval (ROUGE-1: 0.0102), and Ensemble methods (ROUGE-1: 0.0104). I also compare multilingual embedding backbones and observe improvements with E5-multilingual (ROUGE-1: 0.0102). The best retrieval method is BM25, which outperforms TF-IDF by 2x on ROUGE-1. I additionally evaluate a generative approach based on ruT5 and a retrieval-augmented variant (BM25 + ruT5), which substantially improve overlap metrics compared to retrieval-only baselines.
+
+\textbf{Keywords:} lyrics annotation, explanation generation, Russian NLP, retrieval methods, transformer models
+\end{abstract}
+
+\section{Introduction}
+
+Music and poetry are vehicles for complex human expression, densely packed with metaphors, cultural allusions, and emotional nuance. In Russian rap and hip-hop, lyrical complexity is particularly pronounced, with artists weaving sophisticated wordplay, historical references, and literary allusions into their verses.
+
+Understanding these lyrics often requires knowledge beyond surface-level language comprehension:
+\begin{itemize}
+    \item \textbf{Metaphorical expressions} (``Я вижу город под подошвой'' - expressing dominance over one's environment)
+    \item \textbf{Cultural and historical references} (``Петербург - это Ленинград в противогазе'' - evoking Soviet history)
+    \item \textbf{Wordplay and double meanings} (``Играю минор, но это мой мажор'' - puns on musical and emotional registers)
+\end{itemize}
+
+Manual annotation of lyrics is labor-intensive and requires both linguistic knowledge and cultural understanding. I propose LYRA, a system that automatically annotates song lyrics using retrieval-based methods (TF-IDF, BM25, SBERT), hybrid methods, ensemble approaches, and transformer-based generation (ruT5). In experiments on a 2,000-example subset, BM25 is the strongest retrieval baseline (ROUGE-1: 0.014), while ruT5 + RAG reaches ROUGE-1: 0.279 and substantially improves overlap metrics.
+
+\subsection{Team}
+
+\textbf{Kirill Anpilov} developed all components of the LYRA system: dataset collection, implementation of all retrieval and generation approaches, evaluation framework, and this report.
+
+\subsection{Contributions}
+My main contributions are:
+\begin{enumerate}
+    \item A dataset of 22,220 annotations for 3,291 Russian rap songs from Genius
+    \item Implementation of retrieval approaches: TF-IDF, BM25, SBERT, Hybrid, and Ensemble
+    \item Evaluation protocol on a 2,000-example subset with ROUGE metrics
+    \item Analysis of approach strengths and limitations for lyrics annotation
+    \item A reproducible codebase with notebooks and evaluation logs
+\end{enumerate}
+
+\section{Related Work}
+
+\subsection{Lyrics Analysis and NLP}
+
+The application of NLP to music lyrics has a growing body of work. Recent surveys summarize lyrics processing as a full-stack area that spans analysis, generation, and downstream applications such as recommendation (e.g., Watanabe and Goto, 2020). These works motivate lyric-specific preprocessing (short lines, slang, non-standard grammar) and highlight the importance of lexical and semantic features.
+
+\subsection{Automated Lyric Annotation}
+
+Sterckx et al. (2017), \textit{Break it Down for Me: A Study in Automated Lyric Annotation}, introduce the task of automated lyric annotation (ALA) and release a large dataset of crowdsourced Genius annotations. They define ALA as rewriting lyric lines into clearer explanations while adding contextual knowledge when needed. The dataset contains 803,720 lyric-annotation pairs filtered from Genius and is described in detail in their paper (\url{https://arxiv.org/abs/1708.03492}). The work also references public lyric databases such as MetroLyrics and Genius (\url{https://genius.com}). For baselines, they compare SMT, Seq2Seq, and retrieval approaches, and evaluate with BLEU, METEOR, and SARI, plus human ratings. This is the closest prior art to my setting and motivates the retrieval and generation baselines I implement.
+
+\subsection{Metaphor and Figurative Language Detection}
+
+Understanding lyrics requires recognizing figurative language. The VU Amsterdam Metaphor Corpus and the VUA Metaphor Detection shared tasks (NAACL 2018, ACL 2020) provide large-scale benchmarks for metaphor detection. This work goes beyond detection to explanation: the goal is not just to identify metaphors, but to explain their meaning in context.
+
+\subsection{Explanation Generation}
+
+Explanation generation is commonly formulated as a text-to-text task, where models produce natural-language rationales or interpretations conditioned on input text. Datasets such as e-SNLI (explanations for NLI), CoS-E (commonsense explanations), and ComVE (commonsense validation and explanation) established standard evaluation protocols for explanation quality. Sequence-to-sequence architectures (e.g., T5-like models) are a standard choice for this setup.
+
+\subsection{Retrieval-Augmented Generation}
+
+Retrieval-augmented generation (RAG) combines search over external examples with conditional generation. RAG-style systems and dense retrieval methods (e.g., DPR) show that a retrieved memory can improve factuality and grounding. This is particularly relevant for lyrics, where retrieved annotations can provide cultural or contextual grounding for more faithful explanations.
+
+\subsection{Transformer Models for Russian}
+
+For Russian, encoder and encoder-decoder transformer models are widely used for semantic similarity and generation tasks. Russian BERT-like encoders are commonly used for retrieval, while ruT5 and multilingual T5 variants enable fluent explanation generation. Multilingual sentence embedding models (e.g., E5-style encoders) provide robust semantic matching across noisy and short texts.
+
+\subsection{Distinction from Related Work}
+
+While prior work addresses metaphor detection and explanation in other domains, this work specifically targets song lyrics in Russian, which poses unique challenges:
+\begin{enumerate}
+    \item \textbf{Poetic license}: Non-standard grammar and word order
+    \item \textbf{Cultural density}: Heavy use of historical and literary references
+    \item \textbf{Dataset availability}: Large-scale annotated lyrics corpus
+\end{enumerate}
+
+\subsection{Competitive Approaches}
+
+Based on prior work and common baselines in explanation generation, I consider the following competitor approaches:
+\begin{itemize}
+    \item \textbf{Lexical retrieval}: TF-IDF or BM25 with cosine similarity, returning the annotation of the closest fragment.
+    \item \textbf{Semantic retrieval}: sentence embeddings (SBERT, multilingual encoders) with nearest-neighbor search.
+    \item \textbf{Hybrid and ensemble retrieval}: weighted combinations of lexical and semantic scores.
+    \item \textbf{Abstractive generation}: encoder-decoder models (ruT5) trained to generate explanations.
+    \item \textbf{RAG}: retrieval-augmented generation, where retrieved annotations are injected into the prompt.
+    \item \textbf{Upper-bound alternatives}: large LLMs in zero-shot mode or human explanations (not evaluated here).
+\end{itemize}
+
+\section{Dataset}
+
+\subsection{Data Collection}
+
+Annotations are collected from Genius (genius.com), a crowd-sourced music annotation platform. Genius annotations are user-created explanations of song lines, including:
+\begin{itemize}
+    \item Explanations of metaphors and wordplay
+    \item Historical or cultural context
+    \item References to other songs or artists
+    \item Artist interviews and background
+\end{itemize}
+
+\textbf{Collection Process:}
+\begin{enumerate}
+    \item Selected popular Russian rap artists (Pharaoh, Miyagi, Скриптонит, and others)
+    \item Searched for their songs on Genius using the Genius API
+    \item Retrieved all annotations (referents) for each song
+    \item Collected metadata: artist, title, votes, fragment, annotation
+    \item Final dataset: 3,291 songs with 22,220 annotations
+\end{enumerate}
+
+\subsection{Dataset Statistics}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lr}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Number of songs & 3,291 \\
+Total annotations & 22,220 \\
+Average annotations per song & 6.75 \\
+Average fragment length (words) & 10.84 \\
+Average annotation length (words) & 36.12 \\
+Vocabulary size (fragments) & 65,663 \\
+Vocabulary size (annotations) & 168,530 \\
+\bottomrule
+\end{tabular}
+\caption{Dataset statistics for LYRA corpus}
+\label{tab:dataset_stats}
+\end{table}
+
+\subsection{Evaluation Setup}
+
+For all experiments, I use:
+\begin{itemize}
+    \item \textbf{Subset size}: 2,000 annotations (randomly sampled with seed=42)
+    \item \textbf{Evaluation}: Leave-one-out cross-validation
+    \item \textbf{Metrics}: ROUGE-1, ROUGE-2, ROUGE-L, BLEU
+\end{itemize}
+
+This subset ensures computational feasibility while maintaining statistical significance.
+
+\section{Model Description}
+
+I implement and evaluate multiple retrieval approaches and include a generative extension for lyrics annotation. The solutions include lexical retrieval (TF-IDF, BM25), semantic retrieval (SBERT with multilingual backbones such as E5), hybrid and ensemble retrieval, and generation with ruT5 and a retrieval-augmented variant.
+
+\subsection{Baseline: TF-IDF Retrieval}
+
+\textbf{Method:} Traditional information retrieval using Term Frequency-Inverse Document Frequency.
+
+\textbf{Algorithm:}
+\begin{enumerate}
+    \item Vectorize all fragments using TF-IDF (1,000 features, bigrams)
+    \item For query fragment, compute cosine similarity to all corpus fragments
+    \item Return annotation of most similar fragment (excluding self)
+\end{enumerate}
+
+\textbf{Complexity:} $O(n \times d)$ where $n$ = dataset size, $d$ = feature dimension.
+
+\subsection{BM25 Retrieval}
+
+\textbf{Method:} Probabilistic retrieval model, industry standard for search engines.
+
+\textbf{Key features:}
+\begin{itemize}
+    \item Improved over TF-IDF with saturation and length normalization
+    \item Parameters: $k_1 = 1.5$ (term frequency saturation), $b = 0.75$ (length normalization)
+    \item Custom tokenization for Russian: regex pattern for Cyrillic and Latin characters
+\end{itemize}
+
+BM25 scoring function:
+$$\text{score}(q, d) = \sum_{t \in q} \text{IDF}(t) \cdot \frac{f(t, d) \cdot (k_1 + 1)}{f(t, d) + k_1 \cdot (1 - b + b \cdot \frac{|d|}{\text{avgdl}})}$$
+
+where $f(t, d)$ is term frequency in document $d$, and $\text{avgdl}$ is average document length.
+
+\subsection{SBERT Semantic Search}
+
+\textbf{Method:} Semantic similarity using sentence embeddings.
+
+\textbf{Model:} \texttt{paraphrase-multilingual-MiniLM-L12-v2}
+
+\textbf{Algorithm:}
+\begin{enumerate}
+    \item Encode all fragments into 384-dimensional embeddings
+    \item For query, compute cosine similarity in embedding space
+    \item Return annotation of most similar fragment
+\end{enumerate}
+
+\textbf{Advantage:} Captures semantic similarity beyond lexical overlap.
+
+\subsection{Hybrid Retrieval}
+
+\textbf{Method:} Combines BM25 (lexical) and SBERT (semantic) signals.
+
+\textbf{Formula:}
+$$\text{score}_{\text{hybrid}} = \alpha \cdot \text{score}_{\text{BM25}} + (1 - \alpha) \cdot \text{score}_{\text{SBERT}}$$
+
+I test $\alpha \in \{0.3, 0.5, 0.7\}$ and report best result ($\alpha = 0.5$).
+
+\subsection{Ensemble Retrieval}
+
+\textbf{Method:} Weighted combination of TF-IDF, BM25, and SBERT.
+
+\textbf{Formula:}
+$$\text{score}_{\text{ensemble}} = w_1 \cdot \text{score}_{\text{TF-IDF}} + w_2 \cdot \text{score}_{\text{BM25}} + w_3 \cdot \text{score}_{\text{SBERT}}$$
+
+All scores are min-max normalized to $[0, 1]$ before combination.
+
+I test multiple weight configurations and report best: equal weights $(w_1 = w_2 = w_3 = 0.33)$.
+
+\subsection{ruT5 Generation}
+
+\textbf{Method:} Sequence-to-sequence generation using a Russian T5 model.
+
+\textbf{Model:} \texttt{ai-forever/ruT5-base} (222M parameters)
+
+\textbf{Training:}
+\begin{itemize}
+    \item Input: Song fragment
+    \item Output: Annotation explanation
+    \item Train/val split: 90/10
+    \item Epochs: 3
+    \item Batch size: 8
+    \item Learning rate: 5e-5
+    \item Max source length: 128 tokens
+    \item Max target length: 256 tokens
+\end{itemize}
+
+\subsection{ruT5 with RAG}
+
+\textbf{Method:} Retrieval-Augmented Generation combining BM25 retrieval and ruT5 generation.
+
+\textbf{Algorithm:}
+\begin{enumerate}
+    \item Use BM25 to retrieve top-3 similar fragments and their annotations
+    \item Construct input: \texttt{CONTEXT: [retrieved examples] FRAGMENT: [query] ANNOTATION:}
+    \item Generate annotation using fine-tuned ruT5
+\end{enumerate}
+
+\section{Experiments}
+
+\subsection{Metrics}
+
+I use standard text generation metrics:
+
+\begin{itemize}
+    \item \textbf{ROUGE-1}: Unigram overlap (recall, precision, F1)
+    \item \textbf{ROUGE-2}: Bigram overlap
+    \item \textbf{ROUGE-L}: Longest common subsequence
+\end{itemize}
+
+All metrics are computed using \texttt{rouge-score}. BLEU is not reported for retrieval baselines due to its low interpretability on this task.
+
+\subsection{Experiment Setup}
+
+\textbf{Hardware:}
+\begin{itemize}
+    \item Retrieval methods: CPU (MacBook Pro M1)
+    \item Generation methods: GPU (NVIDIA Tesla T4, 16GB)
+\end{itemize}
+
+\textbf{Evaluation protocol:}
+\begin{enumerate}
+    \item Sample 2,000 annotations randomly (seed=42)
+    \item For each annotation:
+    \begin{itemize}
+        \item Remove it from corpus (leave-one-out)
+        \item Generate/retrieve annotation for its fragment
+        \item Compute metrics against ground truth
+    \end{itemize}
+    \item Average metrics across all examples
+\end{enumerate}
+
+\subsection{Baselines}
+
+\textbf{Random baseline:} Randomly select annotation from corpus. Expected ROUGE-1: $\sim$0.002.
+
+\textbf{TF-IDF:} Simple lexical baseline to establish lower bound.
+
+\section{Results}
+
+\subsection{Quantitative Results}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{ROUGE-1} & \textbf{ROUGE-2} & \textbf{ROUGE-L} \\
+\midrule
+TF-IDF Retrieval & 0.0070 & 0.0027 & 0.0062 \\
+SBERT Retrieval & 0.0087 & 0.0050 & 0.0087 \\
+Hybrid ($\alpha=0.5$) & 0.0102 & 0.0050 & 0.0099 \\
+Ensemble (Equal) & 0.0104 & 0.0043 & 0.0102 \\
+BM25 Retrieval & \textbf{0.0140} & 0.0019 & \textbf{0.0124} \\
+\bottomrule
+\end{tabular}
+\caption{Quantitative evaluation results on a 2,000-example subset. Best retrieval method: BM25.}
+\label{tab:results}
+\end{table}
+
+\subsection{Generative Model Results}
+
+I evaluate ruT5 and a retrieval-augmented variant (BM25 + ruT5) on the same 2,000-example evaluation subset. The generative models substantially outperform retrieval-only baselines in token overlap metrics.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{ROUGE-1} & \textbf{ROUGE-2} & \textbf{ROUGE-L} \\
+\midrule
+ruT5 Generation & 0.232 & 0.206 & 0.224 \\
+ruT5 + RAG (BM25) & 0.279 & 0.251 & 0.271 \\
+\bottomrule
+\end{tabular}
+\caption{Generative model results on the 2,000-example subset.}
+\label{tab:gen_results}
+\end{table}
+
+\textbf{Key findings:}
+\begin{enumerate}
+    \item BM25 is the best retrieval method (+100\% over TF-IDF baseline)
+    \item Ensemble methods provide marginal improvement over single methods
+    \item Semantic models (SBERT) benefit from stronger multilingual backbones (E5-multilingual)
+    \item Generative models (ruT5 and ruT5+RAG) outperform retrieval-only approaches by a large margin on ROUGE
+\end{enumerate}
+
+\subsection{Embedding Backbone Comparison}
+
+I evaluate different multilingual sentence encoders for SBERT retrieval. The best result is obtained with \texttt{intfloat/multilingual-e5-small} (ROUGE-1: 0.0102), slightly outperforming the default \texttt{paraphrase-multilingual-MiniLM-L12-v2}.
+
+\subsection{Qualitative Analysis}
+
+\textbf{Example 1 - Metaphor explanation:}
+
+\textit{Fragment:} ``Я вижу город под подошвой''
+
+\textit{BM25 retrieved:} ``Метафора превосходства над городом...'' (partial match)
+
+\textit{Ground truth:} ``Метафора превосходства над городом, взгляд сверху. Лирический герой чувствует себя выше обыденности мегаполиса.''
+
+\textit{Analysis:} Retrieval finds a thematically aligned explanation but often lacks paraphrasing and compositionality.
+
+\subsection{Discussion}
+
+\textbf{Why retrieval methods plateau:}
+\begin{itemize}
+    \item Bound by existing annotations in corpus
+    \item Cannot paraphrase or generalize
+    \item Suffer from vocabulary mismatch
+\end{itemize}
+
+\textbf{Why generation methods may excel:}
+\begin{itemize}
+    \item Can synthesize novel explanations
+    \item Better at paraphrasing and generalization
+    \item Leverage pre-trained knowledge from ruT5
+\end{itemize}
+
+\textbf{Why RAG is promising:}
+\begin{itemize}
+    \item Retrieval provides relevant examples as context
+    \item Generation creates fluent, tailored explanations
+    \item Combines strengths of both paradigms
+\end{itemize}
+
+\section{Conclusion}
+
+I presented LYRA, a system for automatic lyrics annotation in Russian rap. I implemented and evaluated multiple retrieval approaches and included a generative extension (ruT5 with retrieval augmentation). The results demonstrate:
+
+\subsection{Key Findings}
+\begin{enumerate}
+    \item BM25 is the best retrieval-only method (ROUGE-1: 0.0140)
+    \item Ensemble methods provide small gains over single models
+    \item Stronger multilingual encoders (E5) improve semantic retrieval
+    \item Dataset of 22,220 annotations enables meaningful evaluation
+    \item Generative models (ruT5, ruT5+RAG) significantly improve ROUGE scores (0.23--0.28 range)
+\end{enumerate}
+
+\subsection{Contributions}
+\begin{itemize}
+    \item Russian lyrics annotation dataset (22,220 examples)
+    \item Comparison of retrieval approaches and ensembles
+    \item Evaluation of generative extensions (ruT5, RAG)
+    \item Open-source implementation for reproducibility
+\end{itemize}
+
+\subsection{Future Work}
+\begin{enumerate}
+    \item \textbf{Larger models}: Test larger encoder-decoder models or instruction-tuned LLMs
+    \item \textbf{Multi-task learning}: Joint training on metaphor detection and explanation
+    \item \textbf{Cross-lingual}: Extend to English lyrics and compare
+    \item \textbf{Human evaluation}: Assess fluency, relevance, and completeness
+    \item \textbf{Interactive system}: Build web demo for public use
+\end{enumerate}
+
+\subsection{Impact}
+This work advances automatic lyrics understanding for Russian language, contributing to:
+\begin{itemize}
+    \item Music information retrieval
+    \item Russian NLP resources and benchmarks
+    \item Explainable AI in cultural domains
+    \item Practical applications for music education and appreciation
+\end{itemize}
+
+\section{References}
+\begin{itemize}
+    \item Watanabe and Goto, 2020. \textit{Lyrics Information Processing: Analysis, Generation, and Applications}. \url{https://scholar.google.com/scholar?q=Lyrics+Information+Processing:+Analysis,+Generation,+and+Applications}
+    \item Sterckx et al., 2017. \textit{Break it Down for Me: A Study in Automated Lyric Annotation}. \url{https://arxiv.org/abs/1708.03492}
+    \item VUA Metaphor Detection shared tasks (NAACL 2018, ACL 2020). \url{https://aclanthology.org/search/?q=VUA%20Metaphor%20Detection%20Shared%20Task}
+    \item Genius annotation platform. \url{https://genius.com}
+\end{itemize}
+
+\end{document}
