@@ -1,0 +1,118 @@
+# LYRA .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Data files (large datasets)
+data/
+datasets/
+*.csv
+*.tsv
+*.jsonl
+# Keep sample data
+!sample_annotations.json
+
+# Model files (too large for git)
+models/
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.ckpt
+*.safetensors
+
+# Logs
+logs/
+*.log
+
+# Obsidian
+.obsidian/
+.trash/
+
+# API keys and secrets
+.env
+secrets.json
+config.json
+*_token.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.tox/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Results and experiments
+results/
+experiments/
+outputs/
+
+# LaTeX (for report)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.pdf
+# Keep final report
+!final_report.pdf
+
+# Cache
+.cache/
+*.cache
